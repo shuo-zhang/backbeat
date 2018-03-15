@@ -37,6 +37,8 @@ describe Backbeat::Workers::DailyActivity do
     let(:user) { FactoryGirl.create(:user) }
     let(:fun_workflow) { FactoryGirl.create(:workflow, user: user, name: "fun workflow") }
     let(:bad_workflow) { FactoryGirl.create(:workflow, user: user, name: "bad workflow") }
+    let(:untriggered_workflow) { FactoryGirl.create(:workflow, user: user, name: "untriggered workflow") }
+
     let!(:complete_node) do
       FactoryGirl.create(
         :node,
@@ -50,6 +52,7 @@ describe Backbeat::Workers::DailyActivity do
         workflow: fun_workflow
       )
     end
+
     let!(:inconsistent_node) do
       FactoryGirl.create(
         :node,
@@ -61,6 +64,21 @@ describe Backbeat::Workers::DailyActivity do
         current_server_status: :ready,
         current_client_status: :ready,
         workflow: bad_workflow
+      )
+    end
+
+    let!(:untriggered_fire_and_forget_node) do
+      FactoryGirl.create(
+        :node,
+        name: "stalled node",
+        parent: nil,
+        fires_at: start_time - 400.days,
+        updated_at: start_time - 399.days,
+        user: user,
+        current_server_status: :ready,
+        current_client_status: :ready,
+        mode: :fire_and_forget,
+        workflow: untriggered_workflow
       )
     end
 
@@ -112,6 +130,10 @@ describe Backbeat::Workers::DailyActivity do
             filename: "/tmp/inconsistent_nodes/#{Date.today.to_s}.json",
             hostname: "somehost"
           },
+          untriggered_fire_and_forget: {
+            counts: {},
+            filename: "/tmp/untriggered_fire_and_forget_nodes/untriggered_fire_and_forget_nodes_#{Date.today.to_s}.json"
+          },
           completed: {
             counts: {
               "fun workflow"=> { workflow_type_count: 1, node_count: 1 }
@@ -156,7 +178,7 @@ describe Backbeat::Workers::DailyActivity do
         }
 
         allow(subject).to receive(:send_report)
-        expect(subject).to receive(:write_to_file).with(expected_file_contents)
+        expect(subject).to receive(:write_inconsistent_nodes_to_file).with(expected_file_contents)
 
         subject.perform
       end

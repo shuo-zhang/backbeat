@@ -54,19 +54,28 @@ module Backbeat
         inconsistent_nodes = inconsistent_nodes(report_range)
         inconsistent_counts = counts_by_workflow_type(inconsistent_nodes)
         inconsistent_ids = ids_grouped_by_workflow(inconsistent_nodes)
-        file_name = write_to_file(inconsistent_ids)
+        inconsistent_nodes_file_name = write_inconsistent_nodes_to_file(inconsistent_ids)
 
         completed_nodes = completed_nodes(report_range)
         completed_counts = counts_by_workflow_type(completed_nodes)
 
+        untriggered_fire_and_forget_nodes = get_untriggered_fire_and_forget_nodes(report_range)
+        untriggered_fire_and_forget_nodes_counts = counts_by_workflow_type(untriggered_fire_and_forget_nodes)
+        untriggered_fire_and_forget_ids = ids_grouped_by_workflow(untriggered_fire_and_forget_nodes)
+        untriggered_fire_and_forget_node_file_name = write_untriggered_fire_and_forget_nodes_to_file(untriggered_fire_and_forget_ids)
+
         report_data = {
           inconsistent: {
             counts: inconsistent_counts,
-            filename: file_name,
+            filename: inconsistent_nodes_file_name,
             hostname: Config.hostname
           },
           completed: {
             counts: completed_counts,
+          },
+          untriggered_fire_and_forget: {
+            counts: untriggered_fire_and_forget_nodes_counts,
+            filename: untriggered_fire_and_forget_node_file_name
           },
           time_elapsed: (Time.now - start_time).to_i,
           range: report_range,
@@ -79,21 +88,37 @@ module Backbeat
       private
 
       def inconsistent_nodes(range)
-        Node
+        Node.readonly(true)
           .where("fires_at > ?", range[:inconsistent_lower_bound])
           .where("fires_at < ?", range[:inconsistent_upper_bound])
           .where("(current_server_status <> 'complete' OR current_client_status <> 'complete') AND current_server_status <> 'deactivated'")
+          #.where("mode <> 'fire_and_forget'")
+      end
+
+      # refactor
+      def get_untriggered_fire_and_forget_nodes(range)
+        Node.readonly(true)
+          .where("fires_at < ?", Time.now)
+          .where("(current_server_status <> 'complete' OR current_client_status <> 'complete') AND current_server_status <> 'deactivated'")
+          .where(mode: :fire_and_forget)
       end
 
       def completed_nodes(range)
-        Node
+        Node.readonly(true)
           .where("fires_at > ?", range[:completed_lower_bound])
           .where("fires_at < ?", range[:completed_upper_bound])
           .where("current_server_status = 'complete' AND current_client_status = 'complete'")
       end
 
-      def write_to_file(nodes_by_workflow)
+      def write_inconsistent_nodes_to_file(nodes_by_workflow)
         file_name = "/tmp/inconsistent_nodes/#{Date.today}.json"
+        FileUtils.mkdir_p(File.dirname(file_name))
+        File.open(file_name, 'w') { |file| file.write(nodes_by_workflow.to_json) }
+        file_name
+      end
+
+      def write_untriggered_fire_and_forget_nodes_to_file(nodes_by_workflow)
+        file_name = "/tmp/untriggered_fire_and_forget_nodes/untriggered_fire_and_forget_nodes_#{Date.today}.json"
         FileUtils.mkdir_p(File.dirname(file_name))
         File.open(file_name, 'w') { |file| file.write(nodes_by_workflow.to_json) }
         file_name
